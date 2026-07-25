@@ -13,6 +13,7 @@ import webview
 from hid_backend import RecurveDevice
 
 device = RecurveDevice()
+window = None  # set in __main__
 
 
 class Api:
@@ -37,6 +38,13 @@ class Api:
         except Exception as e:
             return {"ok": False, "message": f"Failed: {e}"}
 
+    def set_stage_color(self, index, r, g, b):
+        try:
+            device.set_stage_color(index, r, g, b)
+            return {"ok": True, "message": f"Stage {index + 1} color set"}
+        except Exception as e:
+            return {"ok": False, "message": f"Failed: {e}"}
+
     def set_custom_dpi(self, value):
         # Not confirmed to be supported by the hardware protocol yet.
         return {
@@ -45,6 +53,18 @@ class Api:
                        "mouse's protocol yet — only switching between the 6 "
                        "onboard presets is wired up so far.",
         }
+
+
+def _on_dpi_button_press():
+    # Runs on the listener thread -- push an event into the page's JS.
+    # We can't know the real new stage (readback isn't reliable on this
+    # chip), so the frontend just advances its own counter by one on this
+    # event; see the note in hid_backend.py.
+    if window is not None:
+        try:
+            window.evaluate_js("window.onHardwareDpiButtonPress && window.onHardwareDpiButtonPress()")
+        except Exception:
+            pass
 
 
 def resource_path(relative_path):
@@ -64,4 +84,8 @@ if __name__ == "__main__":
         min_size=(860, 600),
         background_color="#0b0c10",
     )
+    try:
+        device.start_dpi_button_listener(_on_dpi_button_press)
+    except Exception:
+        pass  # device not connected yet -- get_status() in the UI will reflect that
     webview.start()

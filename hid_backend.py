@@ -8,14 +8,18 @@ No vendor code, binaries, or firmware is used or embedded.
 Confirmed via isolated captures + live hardware tests:
   - Polling rate (Report ID 0x40, subcmd 0x05, field 0x04 / 0x08)
   - DPI preset selection (Report ID 0x40, subcmd 0x05, field 0xa6 / 0x2b)
+  - Per-stage RGB color (Report ID 0x40, subcmd 0x05, field 0x57 + stage*3)
+  - DPI hardware-button press event (Report ID 0x42, input report) — this
+    only tells us a press happened, not the resulting stage (readback via
+    Report ID 0x41 doesn't work reliably on this chip), so the app tracks
+    current stage in software and advances it on each press. See NOTE below.
 
 NOT yet confirmed / not implemented:
-  - Arbitrary custom DPI values (the mouse appears to only support switching
-    between 6 onboard presets, not writing a free-form number)
-  - RGB / lighting modes, brightness, breathing speed
+  - RGB effect modes (Neon/Waltz/Colorful/etc.), brightness, breathing speed
   - Button remapping / macros
 """
 
+import threading
 import hid
 
 VID = 0x1bcf
@@ -29,13 +33,16 @@ POLLING_RATES = {
 }
 
 DPI_STAGE_COUNT = 6
+STAGE_COLOR_BASE = 0x57
+STAGE_COLOR_STEP = 3
 
 
 class RecurveDevice:
     """Thin wrapper around the vendor HID interface (usage_page 0xff00)."""
 
     def __init__(self):
-        self._path = None
+        self._listener_thread = None
+        self._listener_stop = threading.Event()
 
     def _find_vendor_interface(self):
         for d in hid.enumerate(VID, PID):
@@ -73,3 +80,45 @@ class RecurveDevice:
             raise ValueError(f"Stage index must be 0-{DPI_STAGE_COUNT - 1}")
         self._send([0x40, 0x05, 0x00, 0xa6, index, 0x00, 0x00, 0x01])
         self._send([0x40, 0x05, 0x00, 0x2b, 0x05, 0x00, 0x00, 0x01])
+
+    def set_stage_color(self, index, r, g, b):
+        """Assign an RGB color (0-255 each) to one of the 6 DPI stages."""
+        if not (0 <= index < DPI_STAGE_COUNT):
+            raise ValueError(f"Stage index must be 0-{DPI_STAGE_COUNT - 1}")
+        field = STAGE_COLOR_BASE + index * STAGE_COLOR_STEP
+        self._send([0x40, 0x05, 0x00, field, r & 0xff, g & 0xff, b & 0xff, 0x03])
+
+    # ---- DPI hardware-button tracking (see NOTE in module docstring) ----
+
+    def start_dpi_button_listener(self, on_press):
+        """
+        Calls on_press() every time the physical DPI-shift button is pressed
+        on the mouse. Does NOT tell you which stage it landed on -- readback
+        isn't reliable on this chip -- so the caller is expected to track
+        "current stage" itself and just advance it by one (wrapping) each
+        time this fires.
+        """
+        path = self._find_vendor_interface()
+        if path is None:
+            raise RuntimeError("Recurve 300 not found (vendor interface missing)")
+
+        h = hid.device()
+        h.open_path(path)
+        h.set_nonblocking(True)
+        self._listener_stop.clear()
+
+        def _loop():
+            while not self._listener_stop.is_set():
+                try:
+                    data = h.read(64, timeout_ms=200)
+                except Exception:
+                    data = None
+                if data and data[0] == 0x42 and len(data) >= 4 and data[3] == 0x01:
+                    on_press()
+            h.close()
+
+        self._listener_thread = threading.Thread(target=_loop, daemon=True)
+        self._listener_thread.start()
+
+    def stop_dpi_button_listener(self):
+        self._listener_stop.set()

@@ -7,7 +7,7 @@ pip install pywebview hidapi pyinstaller
 
 echo.
 echo Building RecurveControl.exe ...
-pyinstaller --noconfirm --onefile ^
+pyinstaller --noconfirm --onefile --windowed ^
     --name RecurveControl ^
     --add-data "gui.html;." ^
     main.py

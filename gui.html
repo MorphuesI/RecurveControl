@@ -66,6 +66,18 @@
   .dpi-info .label{ font-size:13px; color:var(--muted); margin-bottom:10px; }
 
   .custom-dpi{ margin-top:20px; padding-top:20px; border-top:1px solid var(--line); }
+
+  .stage-colors{ margin-top:20px; padding-top:20px; border-top:1px solid var(--line); }
+  .color-row{ display:flex; gap:12px; }
+  .color-swatch{ display:flex; flex-direction:column; align-items:center; gap:6px; }
+  .color-swatch input[type=color]{
+    width:36px; height:36px; border-radius:10px; border:1px solid var(--line);
+    background:none; cursor:pointer; padding:0; overflow:hidden;
+  }
+  .color-swatch input[type=color]::-webkit-color-swatch-wrapper{ padding:0; }
+  .color-swatch input[type=color]::-webkit-color-swatch{ border:none; border-radius:9px; }
+  .color-swatch span{ font-size:10px; color:var(--muted); font-family:'JetBrains Mono'; }
+
   .custom-dpi .row{ display:flex; gap:10px; align-items:center; }
   .custom-dpi input[type=number]{
     width:110px; background:var(--surface-2); border:1px solid var(--line); border-radius:8px;
@@ -136,6 +148,14 @@
         <div class="bow-value" id="dpiVal">1600<span>DPI (preset)</span></div>
         <div class="stage-dots" id="stageDots"></div>
         <div class="label" style="margin-top:18px;">Click a stage to switch the mouse's active onboard preset.</div>
+        <div class="label" id="syncNote" style="margin-top:4px; display:none;">
+          Using the hardware button? Click your current stage once below to sync — after that we'll track each press automatically.
+        </div>
+
+        <div class="stage-colors">
+          <div class="label" style="margin-bottom:10px;">Stage colors</div>
+          <div class="color-row" id="colorRow"></div>
+        </div>
 
         <div class="custom-dpi">
           <div class="row">
@@ -167,16 +187,44 @@
 <script>
   const stages = [400, 800, 1200, 1600, 2400, 6400];
   let activeStage = 3;
+  let synced = true; // false once we know we might be out of sync with hardware button use
   const dotsEl = document.getElementById('stageDots');
   stages.forEach((v,i)=>{
     const d = document.createElement('div');
     d.className = 'stage-dot' + (i===activeStage?' active':'');
-    d.addEventListener('click', ()=> setStage(i));
+    d.addEventListener('click', ()=> setStage(i, true));
     dotsEl.appendChild(d);
   });
+
+  const defaultColors = ['#e3a857','#4fd1d9','#c96bd8','#5ddc7a','#e05959','#f5d76e'];
+  const colorRow = document.getElementById('colorRow');
+  stages.forEach((v,i)=>{
+    const wrap = document.createElement('div');
+    wrap.className = 'color-swatch';
+    const input = document.createElement('input');
+    input.type = 'color';
+    input.value = defaultColors[i];
+    input.addEventListener('change', async ()=>{
+      const hex = input.value.replace('#','');
+      const r = parseInt(hex.substring(0,2),16);
+      const g = parseInt(hex.substring(2,4),16);
+      const b = parseInt(hex.substring(4,6),16);
+      try{
+        const res = await window.pywebview.api.set_stage_color(i, r, g, b);
+        showToast(res.message);
+      }catch(e){ showToast('Error setting color'); }
+    });
+    const label = document.createElement('span');
+    label.textContent = 'S' + (i+1);
+    wrap.appendChild(input);
+    wrap.appendChild(label);
+    colorRow.appendChild(wrap);
+  });
+
   const dpiVal = document.getElementById('dpiVal');
   const stringPath = document.getElementById('string');
   const nock = document.getElementById('nock');
+
 
   function showToast(msg){
     const t = document.getElementById('toast');
@@ -192,17 +240,34 @@
     nock.setAttribute('cy', y);
   }
 
-  async function setStage(i){
+  async function setStage(i, fromClick){
     activeStage = i;
     dpiVal.innerHTML = stages[i] + '<span>DPI (preset)</span>';
     [...dotsEl.children].forEach((d,idx)=> d.classList.toggle('active', idx===i));
     animateString(40 + (i/(stages.length-1))*70);
-    try{
-      const res = await window.pywebview.api.set_dpi_stage(i);
-      showToast(res.message);
-    }catch(e){ showToast('Error setting DPI stage'); }
+    if(fromClick){
+      synced = true;
+      document.getElementById('syncNote').style.display = 'none';
+      try{
+        const res = await window.pywebview.api.set_dpi_stage(i);
+        showToast(res.message);
+      }catch(e){ showToast('Error setting DPI stage'); }
+    }
   }
   animateString(40 + (activeStage/(stages.length-1))*70);
+
+  // Called from Python when the physical DPI-shift button on the mouse is
+  // pressed. We can't read the mouse's true current stage back reliably, so
+  // we just advance our own tracked stage by one (wrapping) to match the
+  // mouse's fixed cycle order. If this drifts, clicking any stage dot
+  // resyncs both the app and the mouse.
+  window.onHardwareDpiButtonPress = function(){
+    const next = (activeStage + 1) % stages.length;
+    setStage(next, false);
+    document.getElementById('syncNote').style.display = 'block';
+    showToast('DPI button pressed — tracked stage ' + (next+1) + ' (click a dot if this looks wrong)');
+  };
+
 
   document.getElementById('applyCustomDpi').addEventListener('click', async ()=>{
     const val = document.getElementById('customDpiInput').value;
