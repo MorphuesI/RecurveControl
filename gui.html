@@ -256,17 +256,16 @@
   }
   animateString(40 + (activeStage/(stages.length-1))*70);
 
-  // Called from Python when the physical DPI-shift button on the mouse is
-  // pressed. We can't read the mouse's true current stage back reliably, so
-  // we just advance our own tracked stage by one (wrapping) to match the
-  // mouse's fixed cycle order. If this drifts, clicking any stage dot
-  // resyncs both the app and the mouse.
+  // Called from Python when a physical button on the mouse (DPI+ or DPI-)
+  // is pressed. We don't yet know how to tell the two apart or read the
+  // true resulting stage back from hardware, so rather than guess (and
+  // risk showing the wrong number), we just flag that a change may have
+  // happened and ask you to confirm the real stage by clicking a dot.
   window.onHardwareDpiButtonPress = function(){
-    const next = (activeStage + 1) % stages.length;
-    setStage(next, false);
     document.getElementById('syncNote').style.display = 'block';
-    showToast('DPI button pressed — tracked stage ' + (next+1) + ' (click a dot if this looks wrong)');
+    showToast('DPI changed on the mouse — click your current stage below to sync');
   };
+
 
 
   document.getElementById('applyCustomDpi').addEventListener('click', async ()=>{
