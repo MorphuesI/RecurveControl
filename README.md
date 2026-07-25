@@ -69,7 +69,3 @@ Use one of these in GitHub repository settings:
 ## Disclaimer
 
 This project is unofficial and not affiliated with the device vendor.
-
-## Repository description (long)
-
-RecurveControl is a Python + pywebview desktop utility for the Mouse Archer Recurve 300 that uses reverse-engineered HID commands to control DPI presets, polling rate, and per-stage RGB colors.
